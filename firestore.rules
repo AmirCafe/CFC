@@ -1,0 +1,178 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, format: email)
+    //   - role: string (required, enum: ['super_admin', 'center_admin', 'staff'])
+    //   - centerId: string (optional, for center_admin and staff)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: centers
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required)
+    //   - adminEmail: string (required, format: email)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: inventory
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required)
+    //   - category: string (required, enum: ['Tables', 'Counters', 'PCs', 'Printers', 'Networking', 'Other'])
+    //   - quantity: int (required, positive)
+    //   - condition: string (required, enum: ['New', 'Used', 'Damaged'])
+    //   - purchaseDate: string (optional, format: YYYY-MM-DD)
+    //   - vendorName: string (optional)
+    //   - centerId: string (required)
+    //   - status: string (required, enum: ['Active', 'Inactive'])
+    //   - updatedAt: timestamp (required)
+    //
+    // Collection: audit_logs
+    // Fields:
+    //   - id: string
+    //   - userId: string
+    //   - userEmail: string
+    //   - action: string
+    //   - targetId: string
+    //   - targetType: string
+    //   - centerId: string
+    //   - timestamp: timestamp
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        (request.auth.token.email == "marwan.khan.pro@gmail.com" && request.auth.token.email_verified == true) ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin'
+      );
+    }
+
+    function isCenterAdmin(centerId) {
+      return isAuthenticated() && (
+        isAdmin() || 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'center_admin' && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.centerId == centerId)
+      );
+    }
+
+    function isStaff(centerId) {
+      return isAuthenticated() && (
+        isCenterAdmin(centerId) ||
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'staff' && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.centerId == centerId)
+      );
+    }
+
+    function hasPermission(perm) {
+      let userData = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return userData.role == 'super_admin' || 
+             userData.role == 'center_admin' || 
+             (userData.role == 'staff' && perm in userData.permissions);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.email == request.auth.token.email &&
+             data.role in ['super_admin', 'center_admin', 'staff'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidUserAdmin(data) {
+      return data.keys().hasAll(['uid', 'email', 'role', 'createdAt']) &&
+             data.email is string && isValidEmail(data.email) &&
+             data.role in ['super_admin', 'center_admin', 'staff'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidCenter(data) {
+      return data.keys().hasAll(['id', 'name', 'adminEmail', 'createdAt']) &&
+             data.id is string && data.id.size() > 0 &&
+             data.name is string && data.name.size() > 0 &&
+             isValidEmail(data.adminEmail) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidInventoryItem(data) {
+      return data.keys().hasAll(['id', 'name', 'category', 'quantity', 'condition', 'centerId', 'status', 'updatedAt']) &&
+             data.id is string && data.name is string && data.name.size() > 0 &&
+             data.category in ['Tables', 'Counters', 'PCs', 'Printers', 'Networking', 'Other'] &&
+             data.quantity is int && data.quantity >= 0 &&
+             data.condition in ['New', 'Used', 'Damaged'] &&
+             data.centerId is string &&
+             data.status in ['Active', 'Inactive'] &&
+             data.updatedAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin() || 
+                    (isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'center_admin' && 
+                     get(/databases/$(database)/documents/users/$(request.auth.uid)).data.centerId == resource.data.centerId);
+      
+      allow create: if (isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'staff' || isAdmin())) || 
+                    (isAdmin() && isValidUserAdmin(request.resource.data)) ||
+                    (isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'center_admin' && 
+                     request.resource.data.centerId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.centerId &&
+                     request.resource.data.role == 'staff' && isValidUserAdmin(request.resource.data));
+      
+      allow update: if (isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin())) || 
+                    (isAdmin() && isValidUserAdmin(request.resource.data)) ||
+                    (isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'center_admin' && 
+                     resource.data.centerId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.centerId &&
+                     request.resource.data.centerId == resource.data.centerId &&
+                     request.resource.data.role == 'staff' && isValidUserAdmin(request.resource.data));
+      
+      allow delete: if isAdmin() && userId != request.auth.uid ||
+                    (isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'center_admin' && 
+                     resource.data.centerId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.centerId &&
+                     resource.data.role == 'staff');
+    }
+
+    match /centers/{centerId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin() && isValidCenter(request.resource.data);
+    }
+
+    match /inventory/{itemId} {
+      allow read: if isAuthenticated() && isStaff(resource.data.centerId) && hasPermission('inventory:read');
+      allow create: if isAuthenticated() && isStaff(request.resource.data.centerId) && hasPermission('inventory:write') && isValidInventoryItem(request.resource.data);
+      allow update: if isAuthenticated() && isStaff(resource.data.centerId) && isStaff(request.resource.data.centerId) && hasPermission('inventory:write') && isValidInventoryItem(request.resource.data);
+      allow delete: if isAuthenticated() && isCenterAdmin(resource.data.centerId) && hasPermission('inventory:delete');
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isAdmin() || (isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.centerId == resource.data.centerId && hasPermission('audit:read'));
+      allow create: if isAuthenticated();
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

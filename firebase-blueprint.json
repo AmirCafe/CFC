@@ -1,0 +1,61 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role-based access control.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email", "description": "User email" },
+        "role": { "type": "string", "enum": ["super_admin", "center_admin"], "description": "User role" },
+        "centerId": { "type": "string", "description": "ID of the center if center_admin" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Center": {
+      "title": "Center",
+      "description": "CFC Center (e.g., Swat, Mardan).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "adminEmail": { "type": "string", "format": "email" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "adminEmail"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Asset managed by a center.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string", "enum": ["Tables", "Counters", "PCs", "Printers", "Networking", "Other"] },
+        "quantity": { "type": "integer" },
+        "condition": { "type": "string", "enum": ["New", "Used", "Damaged"] },
+        "purchaseDate": { "type": "string", "format": "date" },
+        "vendorName": { "type": "string" },
+        "centerId": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Inactive"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "category", "quantity", "condition", "centerId", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profile documents."
+    },
+    "/centers/{centerId}": {
+      "schema": "Center",
+      "description": "CFC Center documents."
+    },
+    "/inventory/{itemId}": {
+      "schema": "InventoryItem",
+      "description": "Asset documents."
+    }
+  }
+}

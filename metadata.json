@@ -1,0 +1,5 @@
+{
+  "name": "CFC Asset Management System",
+  "description": "A full-stack asset management system for CFC Board with role-based access control for Super Admins and Center Admins.",
+  "requestFramePermissions": []
+}
